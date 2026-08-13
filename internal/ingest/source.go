@@ -6,7 +6,7 @@ import (
 )
 
 type Source interface {
-	StreamCommits(ctx context.Context, out chan<- Commit) error
+	StreamCommits(ctx context.Context, out chan<- Commit, errChan chan<- error)
 }
 
 type Developer struct {
