@@ -15,7 +15,7 @@ type Developer struct {
 }
 
 type Commit struct {
-	Hash          string
+	SHA           string
 	Body          string
 	Author        Developer
 	AuthorDate    time.Time

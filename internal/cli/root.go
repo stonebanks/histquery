@@ -5,11 +5,11 @@ import (
 	"path"
 
 	"github.com/spf13/cobra"
-	"github.com/stonebanks/histquery/internal/search"
-	"github.com/stonebanks/histquery/internal/search/sqlite"
+	"github.com/stonebanks/histquery/internal/store"
+	"github.com/stonebanks/histquery/internal/store/sqlite"
 )
 
-var repo *search.Repository
+var repo *store.Repository
 
 var rootCmd = &cobra.Command{
 	Use:   "histquery",

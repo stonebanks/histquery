@@ -6,10 +6,10 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/stonebanks/histquery/internal/search"
+	"github.com/stonebanks/histquery/internal/store"
 )
 
-func New(dbPath string) (*search.Repository, error) {
+func New(dbPath string) (*store.Repository, error) {
 	if err := os.MkdirAll(filepath.Dir(dbPath), 0o755); err != nil {
 		return nil, fmt.Errorf("creating db directory: %w", err)
 	}
@@ -23,5 +23,5 @@ func New(dbPath string) (*search.Repository, error) {
 	if err := runMigrations(db); err != nil {
 		return nil, fmt.Errorf("running migrations: %w", err)
 	}
-	return &search.Repository{Db: db}, nil
+	return &store.Repository{Db: db}, nil
 }
