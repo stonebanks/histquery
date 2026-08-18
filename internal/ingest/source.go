@@ -5,8 +5,11 @@ import (
 	"time"
 )
 
+// Source streams commits into out, returning a fatal error if streaming
+// could not complete. Implementations must not close out; the caller owns
+// its lifetime. StreamCommits must return promptly when ctx is done.
 type Source interface {
-	StreamCommits(ctx context.Context, out chan<- Commit, errChan chan<- error)
+	StreamCommits(ctx context.Context, out chan<- Commit) error
 }
 
 type Developer struct {

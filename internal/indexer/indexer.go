@@ -82,19 +82,22 @@ func (idxr *Indexer) Run(ctx context.Context) error {
 	sourceErrChan := make(chan error, 1)
 	embeddingJobChan := make(chan EmbeddingJob, 50)
 
-	// TODO: Handle cancellation
-
 	semaphore := make(chan struct{}, defaultEmbedConcurrency)
 	var wg sync.WaitGroup
 
 	go func() {
-		wg.Wait()
-		close(embeddingJobChan)
+		defer close(commitsChan)
+		if err := idxr.source.StreamCommits(ctx, commitsChan); err != nil {
+			select {
+			case sourceErrChan <- err:
+			case <-ctx.Done():
+			}
+		}
 	}()
 
-	go idxr.source.StreamCommits(ctx, commitsChan, sourceErrChan)
-
+	dispatchDone := make(chan struct{})
 	go func() {
+		defer close(dispatchDone)
 		for {
 			select {
 			case <-ctx.Done():
@@ -107,6 +110,12 @@ func (idxr *Indexer) Run(ctx context.Context) error {
 				go idxr.processCommit(ctx, commit, embeddingJobChan, &wg, semaphore)
 			}
 		}
+	}()
+
+	go func() {
+		<-dispatchDone
+		wg.Wait()
+		close(embeddingJobChan)
 	}()
 
 	batch := make([]store.EnrichedCommit, 0, batchCommitToStoreSize)
