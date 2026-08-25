@@ -2,12 +2,11 @@ package store
 
 import (
 	"context"
-	"database/sql"
 	"time"
 )
 
-type Repository struct {
-	Db *sql.DB
+type Store interface {
+	SaveEnrichedCommit(ctx context.Context, commits []EnrichedCommit) error
 }
 
 type Commit struct {
@@ -38,8 +37,4 @@ type Embedding struct {
 type EnrichedCommit struct {
 	Commit    Commit
 	Embedding Embedding
-}
-
-type Store interface {
-	SaveEnrichedCommit(ctx context.Context, commits []EnrichedCommit) error
 }
