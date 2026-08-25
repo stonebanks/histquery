@@ -2,11 +2,15 @@ package embed
 
 import "context"
 
+type Model string
+type Input string
+type Embeddings []float32
+
 type CommitMessageEmbeddingResult struct {
-	Vector []float32
-	Model  string
+	Vector []Embeddings
+	Model  Model
 }
 
 type Embedder interface {
-	Embed(ctx context.Context, str string) (CommitMessageEmbeddingResult, error)
+	EmbedBatch(ctx context.Context, batchInputs []Input) (CommitMessageEmbeddingResult, error)
 }
