@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -32,13 +31,13 @@ func (f *fakeSource) StreamCommits(ctx context.Context, out chan<- ingest.Commit
 }
 
 type fakeEmbedder struct {
-	embedFn func(ctx context.Context, str string) (embed.CommitMessageEmbeddingResult, error)
+	embedFn func(ctx context.Context, inputs []embed.Input) (embed.CommitMessageEmbeddingResult, error)
 
 	inFlight    atomic.Int32
 	maxInFlight atomic.Int32
 }
 
-func (f *fakeEmbedder) Embed(ctx context.Context, str string) (embed.CommitMessageEmbeddingResult, error) {
+func (f *fakeEmbedder) EmbedBatch(ctx context.Context, inputs []embed.Input) (embed.CommitMessageEmbeddingResult, error) {
 	cur := f.inFlight.Add(1)
 	defer f.inFlight.Add(-1)
 
@@ -49,7 +48,7 @@ func (f *fakeEmbedder) Embed(ctx context.Context, str string) (embed.CommitMessa
 		}
 	}
 
-	return f.embedFn(ctx, str)
+	return f.embedFn(ctx, inputs)
 }
 
 type fakeStore struct {
@@ -77,17 +76,23 @@ func makeCommits(n int) []ingest.Commit {
 	return commits
 }
 
+// fixedEmbedder returns one deterministic vector per input, tagged with the
+// input's ID so the indexer's SHA -> commit lookup resolves correctly.
 func fixedEmbedder() *fakeEmbedder {
 	return &fakeEmbedder{
-		embedFn: func(ctx context.Context, str string) (embed.CommitMessageEmbeddingResult, error) {
-			return embed.CommitMessageEmbeddingResult{Vector: []float32{0.1, 0.2}, Model: "fake-model"}, nil
+		embedFn: func(ctx context.Context, inputs []embed.Input) (embed.CommitMessageEmbeddingResult, error) {
+			results := make([]embed.Embeddings, len(inputs))
+			for i, in := range inputs {
+				results[i] = embed.Embeddings{ID: in.ID, Value: []float32{0.1, 0.2}}
+			}
+			return embed.CommitMessageEmbeddingResult{Vector: results, Model: "fake-model"}, nil
 		},
 	}
 }
 
 func TestRun_PartialBatch(t *testing.T) {
-	authorDate := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
-	committerDate := time.Date(2024, 1, 2, 0, 0, 0, 0, time.UTC)
+	authorDate := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	committerDate := time.Date(2026, 1, 2, 0, 0, 0, 0, time.UTC)
 	commit := ingest.Commit{
 		SHA:           "abc123",
 		Body:          "fix: something",
@@ -101,7 +106,7 @@ func TestRun_PartialBatch(t *testing.T) {
 	st := &fakeStore{}
 
 	idxr := New(source, embedder, st)
-	if err := idxr.Run(context.Background()); err != nil {
+	if err := idxr.Run(context.Background(), &IndexerOptions{}); err != nil {
 		t.Fatalf("Run() returned error: %v", err)
 	}
 
@@ -148,7 +153,7 @@ func TestRun_ExactBatchBoundary(t *testing.T) {
 	st := &fakeStore{}
 
 	idxr := New(source, embedder, st)
-	if err := idxr.Run(context.Background()); err != nil {
+	if err := idxr.Run(context.Background(), &IndexerOptions{}); err != nil {
 		t.Fatalf("Run() returned error: %v", err)
 	}
 
@@ -166,7 +171,7 @@ func TestRun_BatchBoundaryPlusRemainder(t *testing.T) {
 	st := &fakeStore{}
 
 	idxr := New(source, embedder, st)
-	if err := idxr.Run(context.Background()); err != nil {
+	if err := idxr.Run(context.Background(), &IndexerOptions{}); err != nil {
 		t.Fatalf("Run() returned error: %v", err)
 	}
 
@@ -181,24 +186,23 @@ func TestRun_BatchBoundaryPlusRemainder(t *testing.T) {
 	}
 }
 
+// TestRun_EmbedError verifies that a failed EmbedBatch call fails the whole
+// batch (not just one commit) - embedding is one HTTP call per batch, so
+// there's no per-commit granularity to fail independently.
 func TestRun_EmbedError(t *testing.T) {
 	commits := makeCommits(3)
-	failSHA := commits[1].SHA
 	embedErr := errors.New("embed boom")
 
 	source := &fakeSource{commits: commits}
 	embedder := &fakeEmbedder{
-		embedFn: func(ctx context.Context, str string) (embed.CommitMessageEmbeddingResult, error) {
-			if str == commits[1].Body {
-				return embed.CommitMessageEmbeddingResult{}, embedErr
-			}
-			return embed.CommitMessageEmbeddingResult{Vector: []float32{0.1}, Model: "fake-model"}, nil
+		embedFn: func(ctx context.Context, inputs []embed.Input) (embed.CommitMessageEmbeddingResult, error) {
+			return embed.CommitMessageEmbeddingResult{}, embedErr
 		},
 	}
 	st := &fakeStore{}
 
 	idxr := New(source, embedder, st)
-	err := idxr.Run(context.Background())
+	err := idxr.Run(context.Background(), &IndexerOptions{})
 
 	if err == nil {
 		t.Fatal("Run() returned nil error, want error wrapping embed failure")
@@ -206,20 +210,9 @@ func TestRun_EmbedError(t *testing.T) {
 	if !errors.Is(err, embedErr) {
 		t.Errorf("Run() error = %v, want it to wrap %v", err, embedErr)
 	}
-	if !strings.Contains(err.Error(), failSHA) {
-		t.Errorf("Run() error = %v, want it to mention SHA %q", err, failSHA)
-	}
 
-	if len(st.batches) != 1 {
-		t.Fatalf("got %d batches, want 1", len(st.batches))
-	}
-	if len(st.batches[0]) != 2 {
-		t.Fatalf("got %d commits in batch, want 2 (failed commit excluded)", len(st.batches[0]))
-	}
-	for _, ec := range st.batches[0] {
-		if ec.Commit.SHA == failSHA {
-			t.Errorf("failed commit %q was stored, want it excluded", failSHA)
-		}
+	if len(st.batches) != 0 {
+		t.Fatalf("got %d batches stored, want 0 (whole batch excluded on embed failure)", len(st.batches))
 	}
 }
 
@@ -231,7 +224,7 @@ func TestRun_StoreError(t *testing.T) {
 	st := &fakeStore{saveErr: saveErr}
 
 	idxr := New(source, embedder, st)
-	err := idxr.Run(context.Background())
+	err := idxr.Run(context.Background(), &IndexerOptions{})
 
 	if err == nil {
 		t.Fatal("Run() returned nil error, want error wrapping store failure")
@@ -261,7 +254,7 @@ func TestRun_SourceError(t *testing.T) {
 	idxr := New(source, embedder, st)
 
 	done := make(chan error, 1)
-	go func() { done <- idxr.Run(context.Background()) }()
+	go func() { done <- idxr.Run(context.Background(), &IndexerOptions{}) }()
 
 	select {
 	case err := <-done:
@@ -276,9 +269,13 @@ func TestRun_SourceError(t *testing.T) {
 func TestRun_ContextCancellation(t *testing.T) {
 	source := &fakeSource{commits: makeCommits(1000)}
 	embedder := &fakeEmbedder{
-		embedFn: func(ctx context.Context, str string) (embed.CommitMessageEmbeddingResult, error) {
+		embedFn: func(ctx context.Context, inputs []embed.Input) (embed.CommitMessageEmbeddingResult, error) {
 			time.Sleep(5 * time.Millisecond)
-			return embed.CommitMessageEmbeddingResult{Vector: []float32{0.1}, Model: "fake-model"}, nil
+			results := make([]embed.Embeddings, len(inputs))
+			for i, in := range inputs {
+				results[i] = embed.Embeddings{ID: in.ID, Value: []float32{0.1}}
+			}
+			return embed.CommitMessageEmbeddingResult{Vector: results, Model: "fake-model"}, nil
 		},
 	}
 	st := &fakeStore{}
@@ -287,7 +284,7 @@ func TestRun_ContextCancellation(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
-	go func() { done <- idxr.Run(ctx) }()
+	go func() { done <- idxr.Run(ctx, &IndexerOptions{}) }()
 
 	time.Sleep(20 * time.Millisecond)
 	cancel()
@@ -302,23 +299,29 @@ func TestRun_ContextCancellation(t *testing.T) {
 	}
 }
 
-func TestRun_ConcurrencyBound(t *testing.T) {
-	source := &fakeSource{commits: makeCommits(10)}
+// TestRun_EmbedCallsSequential locks in the current dispatcher design: batches
+// are embedded one at a time in a single goroutine, never concurrently.
+func TestRun_EmbedCallsSequential(t *testing.T) {
+	source := &fakeSource{commits: makeCommits(batchCommitToStoreSize * 2)}
 	embedder := &fakeEmbedder{
-		embedFn: func(ctx context.Context, str string) (embed.CommitMessageEmbeddingResult, error) {
-			time.Sleep(15 * time.Millisecond)
-			return embed.CommitMessageEmbeddingResult{Vector: []float32{1}, Model: "fake-model"}, nil
+		embedFn: func(ctx context.Context, inputs []embed.Input) (embed.CommitMessageEmbeddingResult, error) {
+			time.Sleep(5 * time.Millisecond)
+			results := make([]embed.Embeddings, len(inputs))
+			for i, in := range inputs {
+				results[i] = embed.Embeddings{ID: in.ID, Value: []float32{1}}
+			}
+			return embed.CommitMessageEmbeddingResult{Vector: results, Model: "fake-model"}, nil
 		},
 	}
 	st := &fakeStore{}
 
 	idxr := New(source, embedder, st)
 
-	if err := idxr.Run(context.Background()); err != nil {
+	if err := idxr.Run(context.Background(), &IndexerOptions{}); err != nil {
 		t.Fatalf("Run() returned error: %v", err)
 	}
 
-	if max := embedder.maxInFlight.Load(); max > defaultEmbedConcurrency {
-		t.Errorf("max concurrent Embed calls = %d, want <= %d", max, defaultEmbedConcurrency)
+	if max := embedder.maxInFlight.Load(); max > 1 {
+		t.Errorf("max concurrent EmbedBatch calls = %d, want <= 1 (batches are dispatched sequentially)", max)
 	}
 }
