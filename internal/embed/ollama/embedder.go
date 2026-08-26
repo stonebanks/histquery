@@ -21,11 +21,11 @@ type Embedder struct {
 	client  *http.Client
 }
 
-func New(model *embed.Model) *Embedder {
+func New(model embed.Model) *Embedder {
 
 	var m = defaultModel
-	if model != nil {
-		m = string(*model)
+	if model != "" {
+		m = string(model)
 	}
 
 	return &Embedder{
@@ -48,7 +48,7 @@ type embedResponse struct {
 func (e *Embedder) EmbedBatch(ctx context.Context, batchInputs []embed.Input) (embed.CommitMessageEmbeddingResult, error) {
 	inputs := make([]string, len(batchInputs))
 	for i, v := range batchInputs {
-		inputs[i] = string(v)
+		inputs[i] = v.Value
 	}
 	body, err := json.Marshal(embedRequest{Model: e.model, Input: inputs})
 	if err != nil {
@@ -81,7 +81,10 @@ func (e *Embedder) EmbedBatch(ctx context.Context, batchInputs []embed.Input) (e
 
 	results := make([]embed.Embeddings, len(out.Embeddings))
 	for i, v := range out.Embeddings {
-		results[i] = v
+		results[i] = embed.Embeddings{
+			ID:    batchInputs[i].ID,
+			Value: v,
+		}
 	}
 
 	return embed.CommitMessageEmbeddingResult{

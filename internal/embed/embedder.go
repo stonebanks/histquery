@@ -3,8 +3,14 @@ package embed
 import "context"
 
 type Model string
-type Input string
-type Embeddings []float32
+type Input struct {
+	ID    string
+	Value string
+}
+type Embeddings struct {
+	ID    string
+	Value []float32
+}
 
 type CommitMessageEmbeddingResult struct {
 	Vector []Embeddings
