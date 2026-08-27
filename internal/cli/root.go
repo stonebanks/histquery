@@ -43,7 +43,7 @@ var rootCmd = &cobra.Command{
 	},
 	PersistentPostRunE: func(cmd *cobra.Command, args []string) error {
 		gitRepo := cmd.Context().Value(gitRepoKey).(*localgit.Source)
-		sqliteRepo := cmd.Context().Value(sqliteRepoKey).(*sqlite.Repository)
+		sqliteRepo := cmd.Context().Value(sqliteRepoKey).(*sqlite.Store)
 
 		err := sqliteRepo.Db.Close()
 		if err != nil {

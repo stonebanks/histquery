@@ -27,9 +27,5 @@ func runMigrations(db *sql.DB) error {
 		return err
 	}
 
-	err = provider.Close()
-	if err != nil {
-		return err
-	}
 	return nil
 }

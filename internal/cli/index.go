@@ -24,7 +24,7 @@ func runIndex(cmd *cobra.Command, args []string) error {
 	ctx := cmd.Context()
 
 	source := cmd.Context().Value(gitRepoKey).(*localgit.Source)
-	repo := cmd.Context().Value(sqliteRepoKey).(*sqlite.Repository)
+	repo := cmd.Context().Value(sqliteRepoKey).(*sqlite.Store)
 	embedder := ollama.New("")
 
 	idxr := indexer.New(source, embedder, repo)
