@@ -3,7 +3,9 @@ package cli
 import (
 	"context"
 	"os"
+	"os/signal"
 	"path/filepath"
+	"syscall"
 
 	"github.com/spf13/cobra"
 	"github.com/stonebanks/histquery/internal/ingest/localgit"
@@ -64,5 +66,10 @@ func init() {
 }
 
 func Execute() error {
-	return rootCmd.Execute()
+
+	// Notify for cancellation if sigint or sigterm
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer cancel()
+
+	return rootCmd.ExecuteContext(ctx)
 }
