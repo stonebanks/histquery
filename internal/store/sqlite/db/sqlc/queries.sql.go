@@ -72,3 +72,68 @@ func (q *Queries) InsertEmbedding(ctx context.Context, arg InsertEmbeddingParams
 	)
 	return err
 }
+
+const listUnsyncedEmbeddings = `-- name: ListUnsyncedEmbeddings :many
+SELECT commit_sha, source, model, dim, vector
+FROM embeddings
+WHERE synced_to_chromem_at IS NULL
+`
+
+type ListUnsyncedEmbeddingsRow struct {
+	CommitSha string
+	Source    string
+	Model     string
+	Dim       int64
+	Vector    []byte
+}
+
+func (q *Queries) ListUnsyncedEmbeddings(ctx context.Context) ([]ListUnsyncedEmbeddingsRow, error) {
+	rows, err := q.db.QueryContext(ctx, listUnsyncedEmbeddings)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListUnsyncedEmbeddingsRow{}
+	for rows.Next() {
+		var i ListUnsyncedEmbeddingsRow
+		if err := rows.Scan(
+			&i.CommitSha,
+			&i.Source,
+			&i.Model,
+			&i.Dim,
+			&i.Vector,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const markEmbeddingSynced = `-- name: MarkEmbeddingSynced :exec
+UPDATE embeddings SET synced_to_chromem_at = ?
+WHERE commit_sha = ? AND source = ? and model = ?
+`
+
+type MarkEmbeddingSyncedParams struct {
+	SyncedToChromemAt sql.NullTime
+	CommitSha         string
+	Source            string
+	Model             string
+}
+
+func (q *Queries) MarkEmbeddingSynced(ctx context.Context, arg MarkEmbeddingSyncedParams) error {
+	_, err := q.db.ExecContext(ctx, markEmbeddingSynced,
+		arg.SyncedToChromemAt,
+		arg.CommitSha,
+		arg.Source,
+		arg.Model,
+	)
+	return err
+}

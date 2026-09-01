@@ -20,10 +20,11 @@ type Commit struct {
 }
 
 type Embedding struct {
-	ID        int64
-	CommitSha string
-	Source    string
-	Model     string
-	Dim       int64
-	Vector    []byte
+	ID                int64
+	CommitSha         string
+	Source            string
+	Model             string
+	Dim               int64
+	Vector            []byte
+	SyncedToChromemAt sql.NullTime
 }
