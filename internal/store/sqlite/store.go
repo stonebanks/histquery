@@ -3,20 +3,19 @@ package sqlite
 import (
 	"context"
 	"database/sql"
-	"encoding/binary"
 	"fmt"
-	"math"
 	"os"
 	"path/filepath"
 	"time"
 
 	"github.com/stonebanks/histquery/internal/store"
+	"github.com/stonebanks/histquery/internal/store/helpers"
 	"github.com/stonebanks/histquery/internal/store/sqlite/db/sqlc"
 )
 
 type Store struct {
-	*sqlc.Queries
-	Db *sql.DB
+	queries *sqlc.Queries
+	db      *sql.DB
 }
 
 func New(dbPath string) (*Store, error) {
@@ -35,30 +34,14 @@ func New(dbPath string) (*Store, error) {
 		return nil, fmt.Errorf("running migrations: %w", err)
 	}
 	return &Store{
-			Queries: sqlc.New(db),
-			Db:      db,
+			queries: sqlc.New(db),
+			db:      db,
 		},
 		nil
 }
 
 func (s *Store) Close() error {
-	return s.Db.Close()
-}
-
-func toNullString(s string) sql.NullString {
-	return sql.NullString{String: s, Valid: s != ""}
-}
-
-func toNullTime(t time.Time) sql.NullTime {
-	return sql.NullTime{Time: t, Valid: !t.IsZero()}
-}
-
-func float32sToBytes(v []float32) []byte {
-	buf := make([]byte, len(v)*4)
-	for i, f := range v {
-		binary.LittleEndian.PutUint32(buf[i*4:], math.Float32bits(f))
-	}
-	return buf
+	return s.db.Close()
 }
 
 func (s *Store) SaveEnrichedCommit(ctx context.Context, commits []store.EnrichedCommit) error {
@@ -67,11 +50,11 @@ func (s *Store) SaveEnrichedCommit(ctx context.Context, commits []store.Enriched
 			err := q.InsertCommit(ctx, sqlc.InsertCommitParams{
 				Sha:            c.Commit.SHA,
 				AuthorName:     c.Commit.AuthorName,
-				AuthorEmail:    toNullString(c.Commit.AuthorEmail),
-				AuthorDate:     toNullTime(c.Commit.AuthorDate),
+				AuthorEmail:    helpers.ToNullString(c.Commit.AuthorEmail),
+				AuthorDate:     helpers.ToNullTime(c.Commit.AuthorDate),
 				CommitterName:  c.Commit.CommitterName,
-				CommitterEmail: toNullString(c.Commit.CommitterEmail),
-				CommitterDate:  toNullTime(c.Commit.CommitterDate),
+				CommitterEmail: helpers.ToNullString(c.Commit.CommitterEmail),
+				CommitterDate:  helpers.ToNullTime(c.Commit.CommitterDate),
 				Message:        c.Commit.Body,
 			})
 			if err != nil {
@@ -83,7 +66,7 @@ func (s *Store) SaveEnrichedCommit(ctx context.Context, commits []store.Enriched
 				Source:    string(c.Embedding.Source),
 				Model:     c.Embedding.Model,
 				Dim:       int64(len(c.Embedding.Vector)),
-				Vector:    float32sToBytes(c.Embedding.Vector),
+				Vector:    helpers.Float32sToBytes(c.Embedding.Vector),
 			})
 			if err != nil {
 				return err
@@ -94,8 +77,47 @@ func (s *Store) SaveEnrichedCommit(ctx context.Context, commits []store.Enriched
 	})
 }
 
+func (s *Store) MarkEmbeddingSynced(ctx context.Context, embed store.Embedding) error {
+	return s.execTx(ctx, func(q *sqlc.Queries) error {
+		if err := q.MarkEmbeddingSynced(ctx, sqlc.MarkEmbeddingSyncedParams{
+			SyncedToChromemAt: helpers.ToNullTime(time.Now().UTC()),
+			CommitSha:         embed.SHA,
+			Source:            string(embed.Source),
+			Model:             embed.Model,
+		}); err != nil {
+			return err
+		}
+
+		return nil
+	})
+}
+
+func (s *Store) ListUnsyncedEmbeddings(ctx context.Context) ([]store.Embedding, error) {
+	embeds, err := s.queries.ListUnsyncedEmbeddings(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	results := make([]store.Embedding, len(embeds))
+	for i, e := range embeds {
+		vector, err := helpers.BytesToFloat32s(e.Vector)
+		if err != nil {
+			return nil, fmt.Errorf("decoding vector for commit %s: %w", e.CommitSha, err)
+		}
+
+		results[i] = store.Embedding{
+			SHA:    e.CommitSha,
+			Vector: vector,
+			Model:  e.Model,
+			Source: store.EmbeddingSource(e.Source),
+		}
+	}
+
+	return results, nil
+}
+
 func (s *Store) execTx(ctx context.Context, fn func(*sqlc.Queries) error) error {
-	tx, err := s.Db.BeginTx(ctx, nil)
+	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}

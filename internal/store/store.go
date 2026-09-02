@@ -9,6 +9,11 @@ type Store interface {
 	SaveEnrichedCommit(ctx context.Context, commits []EnrichedCommit) error
 }
 
+type EmbeddingSyncer interface {
+	MarkEmbeddingSynced(ctx context.Context, embed Embedding) error
+	ListUnsyncedEmbeddings(ctx context.Context) ([]Embedding, error)
+}
+
 type Commit struct {
 	SHA            string
 	Body           string

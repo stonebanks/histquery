@@ -7,7 +7,7 @@ import (
 	"github.com/stonebanks/histquery/internal/embed/ollama"
 	"github.com/stonebanks/histquery/internal/indexer"
 	"github.com/stonebanks/histquery/internal/ingest/localgit"
-	"github.com/stonebanks/histquery/internal/store/sqlite"
+	"github.com/stonebanks/histquery/internal/store/syncstore"
 )
 
 var indexCmd = &cobra.Command{
@@ -24,7 +24,7 @@ func runIndex(cmd *cobra.Command, args []string) error {
 	ctx := cmd.Context()
 
 	source := cmd.Context().Value(gitRepoKey).(*localgit.Source)
-	repo := cmd.Context().Value(sqliteRepoKey).(*sqlite.Store)
+	repo := cmd.Context().Value(storeKey).(*syncstore.Store)
 	embedder := ollama.New("")
 
 	idxr := indexer.New(source, embedder, repo)
