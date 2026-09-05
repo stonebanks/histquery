@@ -12,12 +12,13 @@ CREATE TABLE commits (
 CREATE INDEX idx_author ON commits(author_name);
 
 CREATE TABLE embeddings (
-                            id         INTEGER PRIMARY KEY,
-                            commit_sha TEXT NOT NULL REFERENCES commits(sha) ON DELETE CASCADE,
-                            source     TEXT NOT NULL,   -- 'message' or 'diff_summary'
-                            model      TEXT NOT NULL,
-                            dim        INTEGER NOT NULL,
-                            vector     BLOB NOT NULL,   -- little-endian float32s, dim*4 bytes
+                            id                   INTEGER PRIMARY KEY,
+                            commit_sha           TEXT NOT NULL REFERENCES commits(sha) ON DELETE CASCADE,
+                            source               TEXT NOT NULL,   -- 'message' or 'diff_summary'
+                            model                TEXT NOT NULL,
+                            dim                  INTEGER NOT NULL,
+                            vector               BLOB NOT NULL,   -- little-endian float32s, dim*4 bytes
+                            synced_to_chromem_at DATETIME,
                             UNIQUE (commit_sha, model, source),
                             CHECK (length(vector) = dim * 4)
 );

@@ -2,18 +2,20 @@ package cli
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 
 	"github.com/spf13/cobra"
 	"github.com/stonebanks/histquery/internal/ingest/localgit"
 	"github.com/stonebanks/histquery/internal/store/sqlite"
+	"github.com/stonebanks/histquery/internal/store/syncstore"
 )
 
 type ctxKey struct{ name string }
 
 var gitRepoKey = ctxKey{"gitRepo"}
-var sqliteRepoKey = ctxKey{"sqliteRepo"}
+var storeKey = ctxKey{"store"}
 
 var rootCmd = &cobra.Command{
 	Use:   "histquery",
@@ -30,22 +32,30 @@ var rootCmd = &cobra.Command{
 			return err
 		}
 
-		dbPath := filepath.Join(path, ".histquery", "idx.db")
+		appFilePath := filepath.Join(path, "."+cmd.Root().Name())
+
+		dbPath := filepath.Join(appFilePath, "idx.db")
 		sqliteRepo, err := sqlite.New(dbPath)
 		if err != nil {
 			return err
 		}
 
+		syncStore, err := syncstore.New(cmd.Context(), sqliteRepo, appFilePath)
+
+		if err != nil {
+			return fmt.Errorf("creating sync store: %w", err)
+		}
+
 		cmd.SetContext(context.WithValue(cmd.Context(), gitRepoKey, gitRepo))
-		cmd.SetContext(context.WithValue(cmd.Context(), sqliteRepoKey, sqliteRepo))
+		cmd.SetContext(context.WithValue(cmd.Context(), storeKey, syncStore))
 
 		return err
 	},
 	PersistentPostRunE: func(cmd *cobra.Command, args []string) error {
 		gitRepo := cmd.Context().Value(gitRepoKey).(*localgit.Source)
-		sqliteRepo := cmd.Context().Value(sqliteRepoKey).(*sqlite.Store)
+		store := cmd.Context().Value(storeKey).(*syncstore.Store)
 
-		err := sqliteRepo.Db.Close()
+		err := store.Close()
 		if err != nil {
 			return err
 		}

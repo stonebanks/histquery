@@ -14,3 +14,12 @@ INSERT INTO embeddings (
     ?, ?, ?, ?, ?
 )
 ON CONFLICT (commit_sha, model, source) DO NOTHING;
+
+-- name: ListUnsyncedEmbeddings :many
+SELECT commit_sha, source, model, dim, vector
+FROM embeddings
+WHERE synced_to_chromem_at IS NULL;
+
+-- name: MarkEmbeddingSynced :exec
+UPDATE embeddings SET synced_to_chromem_at = ?
+WHERE commit_sha = ? AND source = ? and model = ?;
