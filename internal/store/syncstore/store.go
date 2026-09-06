@@ -55,13 +55,13 @@ func New(ctx context.Context, sqliteStore *sqlite.Store, chromemPath string) (*S
 				return
 			case docs := <-ch:
 				addDocConcurrency := min(len(docs), runtime.NumCPU())
-				if err := c.AddDocuments(workerCtx, docs, addDocConcurrency); err != nil {
+				if err := c.AddDocuments(ctx, docs, addDocConcurrency); err != nil {
 					slog.Error("adding documents:", "error", err)
 					continue
 				}
 
 				for _, doc := range docs {
-					if err := db.MarkEmbeddingSynced(workerCtx, store.Embedding{
+					if err := db.MarkEmbeddingSynced(ctx, store.Embedding{
 						SHA:    doc.Metadata[cst_commitSHA],
 						Model:  doc.Metadata[cst_model],
 						Source: store.EmbeddingSource(doc.Metadata[cst_source]),
@@ -76,28 +76,28 @@ func New(ctx context.Context, sqliteStore *sqlite.Store, chromemPath string) (*S
 	wg.Add(1)
 	go func(db store.EmbeddingSyncer, ch chan []chromem.Document) {
 		defer wg.Done()
-		unsynced, err := db.ListUnsyncedEmbeddings(workerCtx)
+		unsynced, err := db.ListUnsyncedEmbeddings(ctx)
 		if err != nil {
 			slog.Error("listing unsynced embeddings:", "error", err)
 			return
 		}
 
-		documents := make([]chromem.Document, len(unsynced))
-		for i, e := range unsynced {
-			docID := docIDFrom(e)
-			m := make(map[string]string)
-			m[cst_commitSHA] = e.SHA
-			m[cst_source] = string(e.Source)
-			m[cst_model] = e.Model
+		if len(unsynced) > 0 {
+			documents := make([]chromem.Document, len(unsynced))
+			for i, e := range unsynced {
+				docID := docIDFrom(e)
+				m := make(map[string]string)
+				m[cst_commitSHA] = e.SHA
+				m[cst_source] = string(e.Source)
+				m[cst_model] = e.Model
 
-			documents[i] = chromem.Document{
-				ID:        docID,
-				Metadata:  m,
-				Embedding: e.Vector,
+				documents[i] = chromem.Document{
+					ID:        docID,
+					Metadata:  m,
+					Embedding: e.Vector,
+				}
 			}
-		}
 
-		if len(documents) > 0 {
 			select {
 			case ch <- documents:
 			case <-workerCtx.Done():
