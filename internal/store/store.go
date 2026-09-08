@@ -7,11 +7,23 @@ import (
 
 type Store interface {
 	SaveEnrichedCommit(ctx context.Context, commits []EnrichedCommit) error
+	SearchCommitByQueryEmbedding(ctx context.Context, queryEmbedding []float32, opts *SearchByQueryOptions) ([]Commit, error)
 }
 
 type EmbeddingSyncer interface {
 	MarkEmbeddingSynced(ctx context.Context, embed Embedding) error
 	ListUnsyncedEmbeddings(ctx context.Context) ([]Embedding, error)
+}
+
+type CommitRetriever interface {
+	ListCommitsById(ctx context.Context, commits []string) ([]Commit, error)
+}
+
+type PersistentStore interface {
+	SaveEnrichedCommit(ctx context.Context, commits []EnrichedCommit) error
+	Close() error
+	EmbeddingSyncer
+	CommitRetriever
 }
 
 type Commit struct {
@@ -42,4 +54,8 @@ type Embedding struct {
 type EnrichedCommit struct {
 	Commit    Commit
 	Embedding Embedding
+}
+
+type SearchByQueryOptions struct {
+	Take int
 }

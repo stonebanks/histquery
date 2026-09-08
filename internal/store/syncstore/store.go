@@ -9,11 +9,10 @@ import (
 
 	"github.com/philippgille/chromem-go"
 	"github.com/stonebanks/histquery/internal/store"
-	"github.com/stonebanks/histquery/internal/store/sqlite"
 )
 
 type Store struct {
-	db         *sqlite.Store
+	db         store.PersistentStore
 	vectorDb   *chromem.Collection
 	workerChan chan []chromem.Document
 	stop       context.CancelFunc
@@ -27,7 +26,7 @@ const (
 	cst_model     = "model"
 )
 
-func New(ctx context.Context, sqliteStore *sqlite.Store, chromemPath string) (*Store, error) {
+func New(ctx context.Context, sqliteStore store.PersistentStore, chromemPath string) (*Store, error) {
 	wg := sync.WaitGroup{}
 	workerChan := make(chan []chromem.Document)
 	workerCtx, cancel := context.WithCancel(ctx)
@@ -38,8 +37,12 @@ func New(ctx context.Context, sqliteStore *sqlite.Store, chromemPath string) (*S
 		return nil, fmt.Errorf("creating db: %w", err)
 	}
 
-	// chromem does not compute the embedding itself so embeddingFunc is nil
-	c, err := cDb.CreateCollection("commits", nil, nil)
+	embeddingFunc := func(ctx context.Context, text string) ([]float32, error) {
+		// we are not using chromem-go for embedding generation
+		panic(nil)
+	}
+
+	c, err := cDb.CreateCollection("commits", nil, embeddingFunc)
 	if err != nil {
 		cancel()
 		return nil, fmt.Errorf("creating collection: %w", err)
@@ -160,6 +163,32 @@ func (s *Store) SaveEnrichedCommit(ctx context.Context, commits []store.Enriched
 	}
 
 	return nil
+}
+
+func (s *Store) SearchCommitByQueryEmbedding(ctx context.Context, queryEmbedding []float32, opts *store.SearchByQueryOptions) ([]store.Commit, error) {
+	results, err := s.vectorDb.QueryEmbedding(ctx, queryEmbedding, opts.Take, nil, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	type tLookup struct {
+		ID         string
+		similarity float32
+	}
+
+	idSimilarity := make([]tLookup, len(results))
+	lookup := make([]string, len(results))
+	for i, r := range results {
+		idSimilarity[i] = tLookup{ID: r.Metadata[cst_commitSHA], similarity: r.Similarity}
+		lookup[i] = r.Metadata[cst_commitSHA]
+	}
+
+	hydrated, err := s.db.ListCommitsById(ctx, lookup)
+	if err != nil {
+		return nil, fmt.Errorf("getting commit batch: %w", err)
+	}
+
+	return hydrated, nil
 }
 
 func docIDFrom(embedding store.Embedding) string {

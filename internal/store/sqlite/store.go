@@ -116,6 +116,40 @@ func (s *Store) ListUnsyncedEmbeddings(ctx context.Context) ([]store.Embedding, 
 	return results, nil
 }
 
+func (s *Store) ListCommitsById(ctx context.Context, shas []string) ([]store.Commit, error) {
+	if len(shas) == 0 {
+		return []store.Commit{}, nil
+	}
+
+	rows, err := s.queries.ListCommitsById(ctx, shas)
+	if err != nil {
+		return nil, err
+	}
+
+	bySha := make(map[string]store.Commit, len(rows))
+	for _, r := range rows {
+		bySha[r.Sha] = store.Commit{
+			SHA:            r.Sha,
+			Body:           r.Message,
+			AuthorName:     r.AuthorName,
+			AuthorEmail:    helpers.FromNullString(r.AuthorEmail),
+			AuthorDate:     helpers.FromNullTime(r.AuthorDate),
+			CommitterName:  r.CommitterName,
+			CommitterEmail: helpers.FromNullString(r.CommitterEmail),
+			CommitterDate:  helpers.FromNullTime(r.CommitterDate),
+		}
+	}
+
+	results := make([]store.Commit, 0, len(shas))
+	for _, sha := range shas {
+		if c, ok := bySha[sha]; ok {
+			results = append(results, c)
+		}
+	}
+
+	return results, nil
+}
+
 func (s *Store) execTx(ctx context.Context, fn func(*sqlc.Queries) error) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
