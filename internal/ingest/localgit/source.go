@@ -63,12 +63,12 @@ func (l *Source) StreamCommits(ctx context.Context, out chan<- ingest.Commit) er
 				Name:  commit.Author.Name,
 				Email: commit.Author.Email,
 			},
-			AuthorDate: commit.Author.When,
+			AuthorDate: commit.Author.When.UTC(),
 			Committer: ingest.Developer{
 				Name:  commit.Committer.Name,
 				Email: commit.Committer.Email,
 			},
-			CommitterDate: commit.Committer.When,
+			CommitterDate: commit.Committer.When.UTC(),
 		}
 	}
 

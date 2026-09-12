@@ -23,7 +23,9 @@ func New(dbPath string) (*Store, error) {
 		return nil, fmt.Errorf("creating db directory: %w", err)
 	}
 
-	dsn := dbPath + "?_pragma=foreign_keys(1)"
+	// _texttotime + _time_format=datetime: without this, the driver writes DATETIME
+	// via t.String() (e.g. "-0400 -0400" with a fixed zone) and Scan into time.Time fails on read
+	dsn := dbPath + "?_pragma=foreign_keys(1)&_texttotime=1&_time_format=datetime"
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("opening database: %w", err)
@@ -110,6 +112,40 @@ func (s *Store) ListUnsyncedEmbeddings(ctx context.Context) ([]store.Embedding, 
 			Vector: vector,
 			Model:  e.Model,
 			Source: store.EmbeddingSource(e.Source),
+		}
+	}
+
+	return results, nil
+}
+
+func (s *Store) ListCommitsById(ctx context.Context, shas []string) ([]store.Commit, error) {
+	if len(shas) == 0 {
+		return []store.Commit{}, nil
+	}
+
+	rows, err := s.queries.ListCommitsById(ctx, shas)
+	if err != nil {
+		return nil, err
+	}
+
+	bySha := make(map[string]store.Commit, len(rows))
+	for _, r := range rows {
+		bySha[r.Sha] = store.Commit{
+			SHA:            r.Sha,
+			Body:           r.Message,
+			AuthorName:     r.AuthorName,
+			AuthorEmail:    helpers.FromNullString(r.AuthorEmail),
+			AuthorDate:     helpers.FromNullTime(r.AuthorDate),
+			CommitterName:  r.CommitterName,
+			CommitterEmail: helpers.FromNullString(r.CommitterEmail),
+			CommitterDate:  helpers.FromNullTime(r.CommitterDate),
+		}
+	}
+
+	results := make([]store.Commit, 0, len(shas))
+	for _, sha := range shas {
+		if c, ok := bySha[sha]; ok {
+			results = append(results, c)
 		}
 	}
 
