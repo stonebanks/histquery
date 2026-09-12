@@ -62,7 +62,7 @@ func printResults(results []store.SearchSimilarCommitsResult) {
 	for i, result := range results {
 		fmt.Printf("%d. %s%s%s  (similarity: %.4f)\n   %s\n\n",
 			i+1,
-			ansiBold, shortSHA(result.Commit.SHA), ansiReset,
+			ansiBold, shortSHA(result.Commit.SHA.String()), ansiReset,
 			result.Similarity,
 			firstLine(result.Commit.Body),
 		)

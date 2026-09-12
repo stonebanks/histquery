@@ -16,7 +16,7 @@ type EmbeddingSyncer interface {
 }
 
 type CommitRetriever interface {
-	ListCommitsById(ctx context.Context, commits []string) ([]Commit, error)
+	ListCommitsById(ctx context.Context, commits []CommitID) ([]Commit, error)
 }
 
 type PersistentStore interface {
@@ -25,9 +25,8 @@ type PersistentStore interface {
 	EmbeddingSyncer
 	CommitRetriever
 }
-
 type Commit struct {
-	SHA            string
+	SHA            CommitID
 	Body           string
 	AuthorName     string
 	AuthorEmail    string
@@ -45,7 +44,7 @@ const (
 )
 
 type Embedding struct {
-	SHA    string
+	SHA    CommitID
 	Vector []float32
 	Model  string
 	Source EmbeddingSource

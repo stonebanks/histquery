@@ -68,10 +68,14 @@ func (f *fakeStore) SaveEnrichedCommit(ctx context.Context, commits []store.Enri
 	return f.saveErr
 }
 
+func (f *fakeStore) SearchSimilarCommits(ctx context.Context, queryEmbedding []float32, opts *store.SearchByOptions) ([]store.SearchSimilarCommitsResult, error) {
+	return nil, nil
+}
+
 func makeCommits(n int) []ingest.Commit {
 	commits := make([]ingest.Commit, n)
 	for i := range commits {
-		commits[i] = ingest.Commit{SHA: fmt.Sprintf("sha-%d", i), Body: fmt.Sprintf("commit body %d", i)}
+		commits[i] = ingest.Commit{SHA: fmt.Sprintf("%040x", i), Body: fmt.Sprintf("commit body %d", i)}
 	}
 	return commits
 }
@@ -90,11 +94,13 @@ func fixedEmbedder() *fakeEmbedder {
 	}
 }
 
+const testSHA = "1234567890abcdef1234567890abcdef12345678"
+
 func TestRun_PartialBatch(t *testing.T) {
 	authorDate := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	committerDate := time.Date(2026, 1, 2, 0, 0, 0, 0, time.UTC)
 	commit := ingest.Commit{
-		SHA:           "abc123",
+		SHA:           testSHA,
 		Body:          "fix: something",
 		Author:        ingest.Developer{Name: "Ada", Email: "ada@example.com"},
 		AuthorDate:    authorDate,
@@ -117,10 +123,15 @@ func TestRun_PartialBatch(t *testing.T) {
 		t.Fatalf("got %d commits in batch, want 1", len(st.batches[0]))
 	}
 
+	wantSHA, err := store.NewCommitID(testSHA)
+	if err != nil {
+		t.Fatalf("NewCommitID(%q) = %v", testSHA, err)
+	}
+
 	got := st.batches[0][0]
 	want := store.EnrichedCommit{
 		Commit: store.Commit{
-			SHA:            "abc123",
+			SHA:            wantSHA,
 			Body:           "fix: something",
 			AuthorName:     "Ada",
 			AuthorEmail:    "ada@example.com",
@@ -130,7 +141,7 @@ func TestRun_PartialBatch(t *testing.T) {
 			CommitterDate:  committerDate,
 		},
 		Embedding: store.Embedding{
-			SHA:    "abc123",
+			SHA:    wantSHA,
 			Vector: []float32{0.1, 0.2},
 			Model:  "fake-model",
 			Source: store.CommitMessage,

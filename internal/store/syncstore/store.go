@@ -64,8 +64,14 @@ func New(ctx context.Context, sqliteStore store.PersistentStore, chromemPath str
 				}
 
 				for _, doc := range docs {
+					id, err := store.NewCommitID(doc.Metadata[cst_commitSHA])
+					if err != nil {
+						slog.Error("invalid commit id in synced doc:", "error", err)
+						continue
+					}
+
 					if err := db.MarkEmbeddingSynced(ctx, store.Embedding{
-						SHA:    doc.Metadata[cst_commitSHA],
+						SHA:    id,
 						Model:  doc.Metadata[cst_model],
 						Source: store.EmbeddingSource(doc.Metadata[cst_source]),
 					}); err != nil {
@@ -90,7 +96,7 @@ func New(ctx context.Context, sqliteStore store.PersistentStore, chromemPath str
 			for i, e := range unsynced {
 				docID := docIDFrom(e)
 				m := make(map[string]string)
-				m[cst_commitSHA] = e.SHA
+				m[cst_commitSHA] = e.SHA.String()
 				m[cst_source] = string(e.Source)
 				m[cst_model] = e.Model
 
@@ -143,7 +149,7 @@ func (s *Store) SaveEnrichedCommit(ctx context.Context, commits []store.Enriched
 	for i, commit := range commits {
 		docID := docIDFrom(commit.Embedding)
 		m := make(map[string]string)
-		m[cst_commitSHA] = commit.Embedding.SHA
+		m[cst_commitSHA] = commit.Embedding.SHA.String()
 		m[cst_source] = string(commit.Embedding.Source)
 		m[cst_model] = commit.Embedding.Model
 
@@ -179,10 +185,13 @@ func (s *Store) SearchSimilarCommits(ctx context.Context, queryEmbedding []float
 		return nil, err
 	}
 
-	similarityBySHA := make(map[string]float32, len(hits))
-	shas := make([]string, len(hits))
+	similarityBySHA := make(map[store.CommitID]float32, len(hits))
+	shas := make([]store.CommitID, len(hits))
 	for i, m := range hits {
-		sha := m.Metadata[cst_commitSHA]
+		sha, err := store.NewCommitID(m.Metadata[cst_commitSHA])
+		if err != nil {
+			return nil, fmt.Errorf("invalid commit id in search hit: %w", err)
+		}
 		similarityBySHA[sha] = m.Similarity
 		shas[i] = sha
 	}
@@ -204,5 +213,5 @@ func (s *Store) SearchSimilarCommits(ctx context.Context, queryEmbedding []float
 }
 
 func docIDFrom(embedding store.Embedding) string {
-	return embedding.SHA + "|" + embedding.Model + "|" + string(embedding.Source)
+	return embedding.SHA.String() + "|" + embedding.Model + "|" + string(embedding.Source)
 }

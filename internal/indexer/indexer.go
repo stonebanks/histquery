@@ -32,15 +32,20 @@ func New(source ingest.Source, embedder embed.Embedder, store store.Store) *Inde
 
 const batchCommitToStoreSize = 50
 
-func mapToEnrichedCommit(s []StoreInput) []store.EnrichedCommit {
+func mapToEnrichedCommit(s []StoreInput) ([]store.EnrichedCommit, error) {
 
 	result := make([]store.EnrichedCommit, len(s))
 
 	for i, v := range s {
 		c := v.commit
+		id, err := store.NewCommitID(c.SHA)
+		if err != nil {
+			return nil, fmt.Errorf("commit %s: %w", c.SHA, err)
+		}
+
 		result[i] = store.EnrichedCommit{
 			Commit: store.Commit{
-				SHA:            c.SHA,
+				SHA:            id,
 				Body:           c.Body,
 				AuthorName:     c.Author.Name,
 				AuthorEmail:    c.Author.Email,
@@ -50,7 +55,7 @@ func mapToEnrichedCommit(s []StoreInput) []store.EnrichedCommit {
 				CommitterDate:  c.CommitterDate,
 			},
 			Embedding: store.Embedding{
-				SHA:    c.SHA,
+				SHA:    id,
 				Vector: v.messageEmbedding,
 				Model:  string(v.model),
 				Source: store.CommitMessage,
@@ -58,7 +63,7 @@ func mapToEnrichedCommit(s []StoreInput) []store.EnrichedCommit {
 		}
 	}
 
-	return result
+	return result, nil
 }
 
 func (idxr *Indexer) Run(ctx context.Context, options *IndexerOptions) error {
@@ -168,7 +173,13 @@ func (idxr *Indexer) Run(ctx context.Context, options *IndexerOptions) error {
 				return nil
 			}
 
-			if err := idxr.store.SaveEnrichedCommit(ctx, mapToEnrichedCommit(job)); err != nil {
+			enriched, err := mapToEnrichedCommit(job)
+			if err != nil {
+				errs = append(errs, fmt.Errorf("mapping commit batch: %w", err))
+				continue
+			}
+
+			if err := idxr.store.SaveEnrichedCommit(ctx, enriched); err != nil {
 				errs = append(errs, fmt.Errorf("storing commit batch: %w", err))
 			}
 		}

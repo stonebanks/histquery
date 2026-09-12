@@ -50,7 +50,7 @@ func (s *Store) SaveEnrichedCommit(ctx context.Context, commits []store.Enriched
 	return s.execTx(ctx, func(q *sqlc.Queries) error {
 		for _, c := range commits {
 			err := q.InsertCommit(ctx, sqlc.InsertCommitParams{
-				Sha:            c.Commit.SHA,
+				Sha:            c.Commit.SHA.String(),
 				AuthorName:     c.Commit.AuthorName,
 				AuthorEmail:    helpers.ToNullString(c.Commit.AuthorEmail),
 				AuthorDate:     helpers.ToNullTime(c.Commit.AuthorDate),
@@ -64,7 +64,7 @@ func (s *Store) SaveEnrichedCommit(ctx context.Context, commits []store.Enriched
 			}
 
 			err = q.InsertEmbedding(ctx, sqlc.InsertEmbeddingParams{
-				CommitSha: c.Embedding.SHA,
+				CommitSha: c.Embedding.SHA.String(),
 				Source:    string(c.Embedding.Source),
 				Model:     c.Embedding.Model,
 				Dim:       int64(len(c.Embedding.Vector)),
@@ -83,7 +83,7 @@ func (s *Store) MarkEmbeddingSynced(ctx context.Context, embed store.Embedding) 
 	return s.execTx(ctx, func(q *sqlc.Queries) error {
 		if err := q.MarkEmbeddingSynced(ctx, sqlc.MarkEmbeddingSyncedParams{
 			SyncedToChromemAt: helpers.ToNullTime(time.Now().UTC()),
-			CommitSha:         embed.SHA,
+			CommitSha:         embed.SHA.String(),
 			Source:            string(embed.Source),
 			Model:             embed.Model,
 		}); err != nil {
@@ -107,8 +107,13 @@ func (s *Store) ListUnsyncedEmbeddings(ctx context.Context) ([]store.Embedding, 
 			return nil, fmt.Errorf("decoding vector for commit %s: %w", e.CommitSha, err)
 		}
 
+		id, err := store.NewCommitID(e.CommitSha)
+		if err != nil {
+			return nil, fmt.Errorf("decoding commit id for embedding: %w", err)
+		}
+
 		results[i] = store.Embedding{
-			SHA:    e.CommitSha,
+			SHA:    id,
 			Vector: vector,
 			Model:  e.Model,
 			Source: store.EmbeddingSource(e.Source),
@@ -118,20 +123,30 @@ func (s *Store) ListUnsyncedEmbeddings(ctx context.Context) ([]store.Embedding, 
 	return results, nil
 }
 
-func (s *Store) ListCommitsById(ctx context.Context, shas []string) ([]store.Commit, error) {
+func (s *Store) ListCommitsById(ctx context.Context, shas []store.CommitID) ([]store.Commit, error) {
 	if len(shas) == 0 {
 		return []store.Commit{}, nil
 	}
 
-	rows, err := s.queries.ListCommitsById(ctx, shas)
+	stringShas := make([]string, len(shas))
+	for i, sha := range shas {
+		stringShas[i] = sha.String()
+	}
+
+	rows, err := s.queries.ListCommitsById(ctx, stringShas)
 	if err != nil {
 		return nil, err
 	}
 
-	bySha := make(map[string]store.Commit, len(rows))
+	bySha := make(map[store.CommitID]store.Commit, len(rows))
 	for _, r := range rows {
-		bySha[r.Sha] = store.Commit{
-			SHA:            r.Sha,
+		id, err := store.NewCommitID(r.Sha)
+		if err != nil {
+			return nil, fmt.Errorf("decoding commit id: %w", err)
+		}
+
+		bySha[id] = store.Commit{
+			SHA:            id,
 			Body:           r.Message,
 			AuthorName:     r.AuthorName,
 			AuthorEmail:    helpers.FromNullString(r.AuthorEmail),
