@@ -23,7 +23,9 @@ func New(dbPath string) (*Store, error) {
 		return nil, fmt.Errorf("creating db directory: %w", err)
 	}
 
-	dsn := dbPath + "?_pragma=foreign_keys(1)"
+	// _texttotime + _time_format=datetime: without this, the driver writes DATETIME
+	// via t.String() (e.g. "-0400 -0400" with a fixed zone) and Scan into time.Time fails on read
+	dsn := dbPath + "?_pragma=foreign_keys(1)&_texttotime=1&_time_format=datetime"
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("opening database: %w", err)

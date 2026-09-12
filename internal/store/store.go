@@ -7,7 +7,7 @@ import (
 
 type Store interface {
 	SaveEnrichedCommit(ctx context.Context, commits []EnrichedCommit) error
-	SearchCommitByQueryEmbedding(ctx context.Context, queryEmbedding []float32, opts *SearchByQueryOptions) ([]Commit, error)
+	SearchSimilarCommits(ctx context.Context, queryEmbedding []float32, opts *SearchByOptions) ([]SearchSimilarCommitsResult, error)
 }
 
 type EmbeddingSyncer interface {
@@ -56,6 +56,11 @@ type EnrichedCommit struct {
 	Embedding Embedding
 }
 
-type SearchByQueryOptions struct {
+type SearchByOptions struct {
 	Take int
+}
+
+type SearchSimilarCommitsResult struct {
+	Commit     Commit
+	Similarity float32
 }

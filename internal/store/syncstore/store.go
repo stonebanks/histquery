@@ -42,7 +42,7 @@ func New(ctx context.Context, sqliteStore store.PersistentStore, chromemPath str
 		panic(nil)
 	}
 
-	c, err := cDb.CreateCollection("commits", nil, embeddingFunc)
+	c, err := cDb.GetOrCreateCollection("commits", nil, embeddingFunc)
 	if err != nil {
 		cancel()
 		return nil, fmt.Errorf("creating collection: %w", err)
@@ -165,30 +165,42 @@ func (s *Store) SaveEnrichedCommit(ctx context.Context, commits []store.Enriched
 	return nil
 }
 
-func (s *Store) SearchCommitByQueryEmbedding(ctx context.Context, queryEmbedding []float32, opts *store.SearchByQueryOptions) ([]store.Commit, error) {
-	results, err := s.vectorDb.QueryEmbedding(ctx, queryEmbedding, opts.Take, nil, nil)
+func (s *Store) SearchSimilarCommits(ctx context.Context, queryEmbedding []float32, opts *store.SearchByOptions) ([]store.SearchSimilarCommitsResult, error) {
+	take := opts.Take
+	if count := s.vectorDb.Count(); take > count {
+		take = count
+	}
+	if take <= 0 {
+		return nil, nil
+	}
+
+	hits, err := s.vectorDb.QueryEmbedding(ctx, queryEmbedding, take, nil, nil)
 	if err != nil {
 		return nil, err
 	}
 
-	type tLookup struct {
-		ID         string
-		similarity float32
+	similarityBySHA := make(map[string]float32, len(hits))
+	shas := make([]string, len(hits))
+	for i, m := range hits {
+		sha := m.Metadata[cst_commitSHA]
+		similarityBySHA[sha] = m.Similarity
+		shas[i] = sha
 	}
 
-	idSimilarity := make([]tLookup, len(results))
-	lookup := make([]string, len(results))
-	for i, r := range results {
-		idSimilarity[i] = tLookup{ID: r.Metadata[cst_commitSHA], similarity: r.Similarity}
-		lookup[i] = r.Metadata[cst_commitSHA]
-	}
-
-	hydrated, err := s.db.ListCommitsById(ctx, lookup)
+	commits, err := s.db.ListCommitsById(ctx, shas)
 	if err != nil {
 		return nil, fmt.Errorf("getting commit batch: %w", err)
 	}
 
-	return hydrated, nil
+	results := make([]store.SearchSimilarCommitsResult, len(commits))
+	for i, c := range commits {
+		results[i] = store.SearchSimilarCommitsResult{
+			Commit:     c,
+			Similarity: similarityBySHA[c.SHA],
+		}
+	}
+
+	return results, nil
 }
 
 func docIDFrom(embedding store.Embedding) string {
