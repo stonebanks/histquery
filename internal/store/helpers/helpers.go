@@ -16,6 +16,14 @@ func ToNullTime(t time.Time) sql.NullTime {
 	return sql.NullTime{Time: t, Valid: !t.IsZero()}
 }
 
+func FromNullString(s sql.NullString) string {
+	return s.String
+}
+
+func FromNullTime(t sql.NullTime) time.Time {
+	return t.Time
+}
+
 func Float32sToBytes(v []float32) []byte {
 	buf := make([]byte, len(v)*4)
 	for i, f := range v {

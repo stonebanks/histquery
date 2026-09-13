@@ -8,6 +8,7 @@ package sqlc
 import (
 	"context"
 	"database/sql"
+	"strings"
 )
 
 const insertCommit = `-- name: InsertCommit :exec
@@ -71,6 +72,54 @@ func (q *Queries) InsertEmbedding(ctx context.Context, arg InsertEmbeddingParams
 		arg.Vector,
 	)
 	return err
+}
+
+const listCommitsById = `-- name: ListCommitsById :many
+SELECT sha, author_name, author_email, author_date, committer_name, committer_email, committer_date, message
+FROM commits
+WHERE sha IN (/*SLICE:shas*/?)
+`
+
+func (q *Queries) ListCommitsById(ctx context.Context, shas []string) ([]Commit, error) {
+	query := listCommitsById
+	var queryParams []interface{}
+	if len(shas) > 0 {
+		for _, v := range shas {
+			queryParams = append(queryParams, v)
+		}
+		query = strings.Replace(query, "/*SLICE:shas*/?", strings.Repeat(",?", len(shas))[1:], 1)
+	} else {
+		query = strings.Replace(query, "/*SLICE:shas*/?", "NULL", 1)
+	}
+	rows, err := q.db.QueryContext(ctx, query, queryParams...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Commit{}
+	for rows.Next() {
+		var i Commit
+		if err := rows.Scan(
+			&i.Sha,
+			&i.AuthorName,
+			&i.AuthorEmail,
+			&i.AuthorDate,
+			&i.CommitterName,
+			&i.CommitterEmail,
+			&i.CommitterDate,
+			&i.Message,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listUnsyncedEmbeddings = `-- name: ListUnsyncedEmbeddings :many

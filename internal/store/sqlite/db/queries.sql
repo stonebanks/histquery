@@ -23,3 +23,8 @@ WHERE synced_to_chromem_at IS NULL;
 -- name: MarkEmbeddingSynced :exec
 UPDATE embeddings SET synced_to_chromem_at = ?
 WHERE commit_sha = ? AND source = ? and model = ?;
+
+-- name: ListCommitsById :many
+SELECT sha, author_name, author_email, author_date, committer_name, committer_email, committer_date, message
+FROM commits
+WHERE sha IN (sqlc.slice('shas'));

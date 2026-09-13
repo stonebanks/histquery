@@ -9,11 +9,10 @@ import (
 
 	"github.com/philippgille/chromem-go"
 	"github.com/stonebanks/histquery/internal/store"
-	"github.com/stonebanks/histquery/internal/store/sqlite"
 )
 
 type Store struct {
-	db         *sqlite.Store
+	db         store.PersistentStore
 	vectorDb   *chromem.Collection
 	workerChan chan []chromem.Document
 	stop       context.CancelFunc
@@ -27,7 +26,7 @@ const (
 	cst_model     = "model"
 )
 
-func New(ctx context.Context, sqliteStore *sqlite.Store, chromemPath string) (*Store, error) {
+func New(ctx context.Context, sqliteStore store.PersistentStore, chromemPath string) (*Store, error) {
 	wg := sync.WaitGroup{}
 	workerChan := make(chan []chromem.Document)
 	workerCtx, cancel := context.WithCancel(ctx)
@@ -38,8 +37,12 @@ func New(ctx context.Context, sqliteStore *sqlite.Store, chromemPath string) (*S
 		return nil, fmt.Errorf("creating db: %w", err)
 	}
 
-	// chromem does not compute the embedding itself so embeddingFunc is nil
-	c, err := cDb.CreateCollection("commits", nil, nil)
+	embeddingFunc := func(ctx context.Context, text string) ([]float32, error) {
+		// we are not using chromem-go for embedding generation
+		panic(nil)
+	}
+
+	c, err := cDb.GetOrCreateCollection("commits", nil, embeddingFunc)
 	if err != nil {
 		cancel()
 		return nil, fmt.Errorf("creating collection: %w", err)
@@ -61,8 +64,14 @@ func New(ctx context.Context, sqliteStore *sqlite.Store, chromemPath string) (*S
 				}
 
 				for _, doc := range docs {
+					id, err := store.NewCommitID(doc.Metadata[cst_commitSHA])
+					if err != nil {
+						slog.Error("invalid commit id in synced doc:", "error", err)
+						continue
+					}
+
 					if err := db.MarkEmbeddingSynced(ctx, store.Embedding{
-						SHA:    doc.Metadata[cst_commitSHA],
+						SHA:    id,
 						Model:  doc.Metadata[cst_model],
 						Source: store.EmbeddingSource(doc.Metadata[cst_source]),
 					}); err != nil {
@@ -87,7 +96,7 @@ func New(ctx context.Context, sqliteStore *sqlite.Store, chromemPath string) (*S
 			for i, e := range unsynced {
 				docID := docIDFrom(e)
 				m := make(map[string]string)
-				m[cst_commitSHA] = e.SHA
+				m[cst_commitSHA] = e.SHA.String()
 				m[cst_source] = string(e.Source)
 				m[cst_model] = e.Model
 
@@ -140,7 +149,7 @@ func (s *Store) SaveEnrichedCommit(ctx context.Context, commits []store.Enriched
 	for i, commit := range commits {
 		docID := docIDFrom(commit.Embedding)
 		m := make(map[string]string)
-		m[cst_commitSHA] = commit.Embedding.SHA
+		m[cst_commitSHA] = commit.Embedding.SHA.String()
 		m[cst_source] = string(commit.Embedding.Source)
 		m[cst_model] = commit.Embedding.Model
 
@@ -162,6 +171,47 @@ func (s *Store) SaveEnrichedCommit(ctx context.Context, commits []store.Enriched
 	return nil
 }
 
+func (s *Store) SearchSimilarCommits(ctx context.Context, queryEmbedding []float32, opts *store.SearchByOptions) ([]store.SearchSimilarCommitsResult, error) {
+	take := opts.Take
+	if count := s.vectorDb.Count(); take > count {
+		take = count
+	}
+	if take <= 0 {
+		return nil, nil
+	}
+
+	hits, err := s.vectorDb.QueryEmbedding(ctx, queryEmbedding, take, nil, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	similarityBySHA := make(map[store.CommitID]float32, len(hits))
+	shas := make([]store.CommitID, len(hits))
+	for i, m := range hits {
+		sha, err := store.NewCommitID(m.Metadata[cst_commitSHA])
+		if err != nil {
+			return nil, fmt.Errorf("invalid commit id in search hit: %w", err)
+		}
+		similarityBySHA[sha] = m.Similarity
+		shas[i] = sha
+	}
+
+	commits, err := s.db.ListCommitsById(ctx, shas)
+	if err != nil {
+		return nil, fmt.Errorf("getting commit batch: %w", err)
+	}
+
+	results := make([]store.SearchSimilarCommitsResult, len(commits))
+	for i, c := range commits {
+		results[i] = store.SearchSimilarCommitsResult{
+			Commit:     c,
+			Similarity: similarityBySHA[c.SHA],
+		}
+	}
+
+	return results, nil
+}
+
 func docIDFrom(embedding store.Embedding) string {
-	return embedding.SHA + "|" + embedding.Model + "|" + string(embedding.Source)
+	return embedding.SHA.String() + "|" + embedding.Model + "|" + string(embedding.Source)
 }

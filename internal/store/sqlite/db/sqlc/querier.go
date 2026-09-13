@@ -11,6 +11,7 @@ import (
 type Querier interface {
 	InsertCommit(ctx context.Context, arg InsertCommitParams) error
 	InsertEmbedding(ctx context.Context, arg InsertEmbeddingParams) error
+	ListCommitsById(ctx context.Context, shas []string) ([]Commit, error)
 	ListUnsyncedEmbeddings(ctx context.Context) ([]ListUnsyncedEmbeddingsRow, error)
 	MarkEmbeddingSynced(ctx context.Context, arg MarkEmbeddingSyncedParams) error
 }
