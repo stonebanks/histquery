@@ -14,6 +14,11 @@ $ ollama pull nomic-embed-text # pull embedding model
 
 ```bash
 $ go build ./cmd/history
+```
+
+### Usage
+```
 $ ./histquery index # to run inside git repo
+$ ./histquery search "some query"
 ```
  Local embeddings (Ollama), SQLite, chromem-go, no cloud, no accounts ask natural-language questions and get cited answers from your own commits.
